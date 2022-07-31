@@ -3,10 +3,10 @@
 Author : Erick Samera
 Date   : 2022-07-30->2022-07-31
 Purpose: To run an in-silico PCR using bacterial genomes.
-Version: v1.0.2
+Version: v1.1.0
 """
 
-# argument parsing
+# argument parsing modules
 import argparse
 from typing import NamedTuple
 
@@ -27,14 +27,14 @@ class Args(NamedTuple):
     f_seq: str
     r_seq: str
     max_mismatch: int
-
+    memory: int
 # --------------------------------------------------
 def get_args() -> Args:
     """ Get command-line arguments """
 
     parser = argparse.ArgumentParser(
         usage='%(prog)s [--init/--run] [name] [options]',
-        description='Fetch sequences from NCBI Entrez with a list of search queries',
+        description='Fetch sequences from NCBI Entrez and perform an iterative in-silico PCR',
         formatter_class=argparse.MetavarTypeHelpFormatter)
 
     group_main = parser.add_mutually_exclusive_group(required=True)
@@ -92,11 +92,19 @@ def get_args() -> Args:
         type=int,
         default=4,
         help="maximum mismatches to consider for amplification (default=4)")
+    group_ipcr.add_argument(
+        '-M',
+        dest='memory',
+        metavar='int',
+        type=int,
+        default=None,
+        help="memory (MB) to allocate to in-silico PCR")
 
     args = parser.parse_args()
 
     if args.init: print_runtime(f'Running prokaryotic-ipcr with the --init setting.')
     if args.run: print_runtime(f'Running prokaryotic-ipcr with the --run setting.')
+    if args.run and args.memory: print_runtime(f'Using {args.memory} MB of memory.')
 
     # if initializing the database and it already exists, make sure overwrite flag is active
     if all((args.init, pathlib.Path.cwd().joinpath('db').joinpath(args.name).exists(), not args.overwrite)):
@@ -104,7 +112,7 @@ def get_args() -> Args:
 
     # if running the database, make sure the forward and reverse primer sequences are specified
     if args.run and not (args.f_seq and args.r_seq):
-        parser.error('Specify the forward and reverse primer sequences with -f and -r, respectively. ')
+        parser.error('Specify the forward and reverse primer sequences with -f and -r, respectively.')
 
     # if primers are specified, make sure that they're actually
     allowed_chars = 'ACGTUWSMKRYBDHVN'
@@ -113,7 +121,7 @@ def get_args() -> Args:
             if nucleotide not in allowed_chars:
                 parser.error(f'Invalid character {nucleotide} in primer sequences.')
 
-    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch)
+    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch, args.memory)
 # --------------------------------------------------
 def main() -> None:
     args = get_args()
@@ -122,7 +130,7 @@ def main() -> None:
     # create_database directory
     db_output = home.joinpath('db')
     db_output.mkdir(parents=True, exist_ok=True)
-    
+
     if args.init:
         named_db=db_output.joinpath(args.name)
         create_db(named_db, args.db_fetch_num)
@@ -134,11 +142,11 @@ def main() -> None:
         iter_total_represented_accession_count = {'Bacteria': 0, 'Archaea': 0}
         actual_represented_accession_count = {'Bacteria': 0, 'Archaea': 0}
         actual_total_accession_count = {'Bacteria': 0, 'Archaea': 0}
-        
+
         # realistically 10?
         for mismatch_iter in range(0, args.max_mismatch):
             print_runtime(f'Iteratively allowing more mismatches in the primer sequence... (Iteration {mismatch_iter+1})')
-            iPCR_results = iPCR(named_db, (args.f_seq, args.r_seq), mismatch_iter)
+            iPCR_results = iPCR(named_db, (args.f_seq, args.r_seq), mismatch_iter, args.memory)
 
             total_count += iPCR_results[0]
             total_bacterial_count += iPCR_results[1]
@@ -239,7 +247,7 @@ def create_db(db_name_arg: pathlib.Path, db_fetch_num_arg: int) -> None:
     #print(running_counts)
     print_runtime(f"Created db/{db_name_arg.name}/taxonomy_map.txt")
     print_runtime(f"Retrieved {running_counts['Bacteria']+running_counts['Archaea']} total sequences: {running_counts['Bacteria']} bacterial; {running_counts['Archaea']} archaeal; specifically {running_counts['Methanogens']} methanogens.")
-def iPCR(db_name_arg: pathlib.Path, primers_arg: tuple, mismatch_arg: int = 0) -> tuple:
+def iPCR(db_name_arg: pathlib.Path, primers_arg: tuple, mismatch_arg: int = 0, mem_arg=None) -> tuple:
     """
     Function will perform in-silico PCR with ipcress and output products.
 
@@ -282,8 +290,9 @@ def iPCR(db_name_arg: pathlib.Path, primers_arg: tuple, mismatch_arg: int = 0) -
             '--pretty', 'False',
             '--products', 'True',
             '--seed', '15s',
-            '--memory', '24000'
         ]
+        if mem_arg and (mem_arg < 64001):
+            args+= ['--memory', str(mem_arg)]
 
         iPCR_results = subprocess.run(args, check=False, capture_output=True)
         PCR_products_list = str(iPCR_results.stdout).split('>')[1:]
