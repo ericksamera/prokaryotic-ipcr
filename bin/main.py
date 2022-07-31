@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Author : Erick Samera
-Date   : 2022-07-30
+Date   : 2022-07-30->2022-07-31
 Purpose: To run an in-silico PCR using bacterial genomes.
+Version: v1.0.2
 """
 
 # argument parsing
@@ -22,11 +23,10 @@ class Args(NamedTuple):
     run: bool
     name: str
     overwrite: bool
-
     db_fetch_num: int
-
     f_seq: str
     r_seq: str
+    max_mismatch: int
 
 # --------------------------------------------------
 def get_args() -> Args:
@@ -56,8 +56,7 @@ def get_args() -> Args:
 
 
     group_database = parser.add_argument_group(
-        title='database options',
-        description='use with --init')
+        title='database options (use with --init)')
     group_database.add_argument(
         '--overwrite',
         action='store_true',
@@ -65,26 +64,34 @@ def get_args() -> Args:
     group_database.add_argument(
         '-n',
         dest='db_fetch_num',
-        metavar='<int>',
+        metavar='int',
         type=int,
         default=10,
-        help="number of sequences to fetch (default=1000)")
+        help="number of sequences to fetch (default=10)")
 
-    group_ipcr = parser.add_argument_group('PCR options')
+    group_ipcr = parser.add_argument_group(
+        title='PCR options (use with --run)')
     group_ipcr.add_argument(
         '-f',
         dest='f_seq',
         metavar='FWD',
         type=str,
         default=None,
-        help="How deep sohuld this database go")
+        help="forward primer sequence (5'-3')")
     group_ipcr.add_argument(
         '-r',
         dest='r_seq',
         metavar='REV',
         type=str,
         default=None,
-        help="How deep sohuld this database go")
+        help="reverse primer sequence (5'-3')")
+    group_ipcr.add_argument(
+        '-m',
+        dest='max_mismatch',
+        metavar='int',
+        type=int,
+        default=4,
+        help="maximum mismatches to consider for amplification (default=4)")
 
     args = parser.parse_args()
 
@@ -106,7 +113,7 @@ def get_args() -> Args:
             if nucleotide not in allowed_chars:
                 parser.error(f'Invalid character {nucleotide} in primer sequences.')
 
-    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq)
+    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch)
 # --------------------------------------------------
 def main() -> None:
     args = get_args()
@@ -129,7 +136,7 @@ def main() -> None:
         actual_total_accession_count = {'Bacteria': 0, 'Archaea': 0}
         
         # realistically 10?
-        for mismatch_iter in range(0, 7):
+        for mismatch_iter in range(0, args.max_mismatch):
             print_runtime(f'Iteratively allowing more mismatches in the primer sequence... (Iteration {mismatch_iter+1})')
             iPCR_results = iPCR(named_db, (args.f_seq, args.r_seq), mismatch_iter)
 
@@ -141,7 +148,6 @@ def main() -> None:
                 iter_represented_accession_count[taxon] += len(iPCR_results[3][taxon])
                 iter_total_represented_accession_count[taxon] += iPCR_results[4][taxon]
                 actual_total_accession_count[taxon] = iPCR_results[4][taxon]
-                #print(iter_represented_accession_count[taxon], iter_total_represented_accession_count[taxon])
                 try:
                     if len(iPCR_results[3][taxon]) > actual_represented_accession_count[taxon]:
                         actual_represented_accession_count[taxon] = len(iPCR_results[3][taxon])
@@ -150,8 +156,10 @@ def main() -> None:
         print_report("Population", f"Total: {actual_total_accession_count['Bacteria']+actual_total_accession_count['Archaea']}\tBacteria: {actual_total_accession_count['Bacteria']}\tArchaea: {actual_total_accession_count['Archaea']}")
         print_report("Total 'reads'", f'Total: {total_count}\tBacteria: {total_bacterial_count}\tArchaea: {total_archaeal_count}')
         for taxon in iter_represented_accession_count:
-            approx_efficiency = iter_represented_accession_count[taxon]/iter_total_represented_accession_count[taxon]
-            percent_represented = actual_represented_accession_count[taxon]/actual_total_accession_count[taxon]
+            try:approx_efficiency = iter_represented_accession_count[taxon]/iter_total_represented_accession_count[taxon]
+            except ZeroDivisionError: approx_efficiency = 0.0
+            try: percent_represented = actual_represented_accession_count[taxon]/actual_total_accession_count[taxon]
+            except: percent_represented = 0.0
             print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)}\tPercent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
 # --------------------------------------------------'
 def create_db(db_name_arg: pathlib.Path, db_fetch_num_arg: int) -> None:
@@ -231,7 +239,7 @@ def create_db(db_name_arg: pathlib.Path, db_fetch_num_arg: int) -> None:
     #print(running_counts)
     print_runtime(f"Created db/{db_name_arg.name}/taxonomy_map.txt")
     print_runtime(f"Retrieved {running_counts['Bacteria']+running_counts['Archaea']} total sequences: {running_counts['Bacteria']} bacterial; {running_counts['Archaea']} archaeal; specifically {running_counts['Methanogens']} methanogens.")
-def iPCR(db_name_arg, primers_arg: tuple, mismatch_arg: int = 0):
+def iPCR(db_name_arg: pathlib.Path, primers_arg: tuple, mismatch_arg: int = 0) -> tuple:
     """
     Function will perform in-silico PCR with ipcress and output products.
 
@@ -289,8 +297,11 @@ def iPCR(db_name_arg, primers_arg: tuple, mismatch_arg: int = 0):
     for taxon in represented_accessions:
         represented_accessions[taxon] = sorted(set(represented_accessions[taxon]))
 
-    return count_archaea+count_bacteria, count_bacteria, count_archaea, represented_accessions, total_accession_count
+    total_read_count = count_archaea+count_bacteria
+
+    return total_read_count, count_bacteria, count_archaea, represented_accessions, total_accession_count
 def print_report(heading, action) -> None:
+    """Print some reporting information at the end of the program."""
     print(f'{heading}:\t\t{action}')
 def print_runtime(action) -> None:
     """Prints an action with the time it was performed."""
