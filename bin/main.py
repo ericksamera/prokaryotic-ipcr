@@ -141,17 +141,18 @@ def main() -> None:
                 iter_represented_accession_count[taxon] += len(iPCR_results[3][taxon])
                 iter_total_represented_accession_count[taxon] += iPCR_results[4][taxon]
                 actual_total_accession_count[taxon] = iPCR_results[4][taxon]
+                #print(iter_represented_accession_count[taxon], iter_total_represented_accession_count[taxon])
                 try:
-                    #print(iPCR_results[3][taxon])
-                    if len(iPCR_results[3][taxon]) > actual_represented_accession_count[taxon]: 
+                    if len(iPCR_results[3][taxon]) > actual_represented_accession_count[taxon]:
                         actual_represented_accession_count[taxon] = len(iPCR_results[3][taxon])
                 except: pass
         print_runtime("Completed job. \n")
-        print_report("Total 'reads'", f'Total: {total_count}     Bacteria: {total_bacterial_count}     Archaea: {total_archaeal_count}')
+        print_report("Population", f"Total: {actual_total_accession_count['Bacteria']+actual_total_accession_count['Archaea']}\tBacteria: {actual_total_accession_count['Bacteria']}\tArchaea: {actual_total_accession_count['Archaea']}")
+        print_report("Total 'reads'", f'Total: {total_count}\tBacteria: {total_bacterial_count}\tArchaea: {total_archaeal_count}')
         for taxon in iter_represented_accession_count:
             approx_efficiency = iter_represented_accession_count[taxon]/iter_total_represented_accession_count[taxon]
             percent_represented = actual_represented_accession_count[taxon]/actual_total_accession_count[taxon]
-            print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)}     Percent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
+            print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)}\tPercent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
 # --------------------------------------------------'
 def create_db(db_name_arg: pathlib.Path, db_fetch_num_arg: int) -> None:
     """
@@ -260,7 +261,7 @@ def iPCR(db_name_arg, primers_arg: tuple, mismatch_arg: int = 0):
         for result in taxonomy_map:
             accession = result.split('\t')[0]
             taxonomy_data[accession] = [taxon.strip()[1:-1] for taxon in result.split('\t')[1].strip()[1:-1].split(',')]
-            if mismatch_arg > 0: total_accession_count[taxonomy_data[accession][0]] += 1
+            total_accession_count[taxonomy_data[accession][0]] += 1
 
         with open(db_name_arg.parent.joinpath('ipcr_file.ipcress'), 'w') as ipcr_file:
             ipcr_file.write(f'ID0001 {primers_arg[0]} {primers_arg[1]} 0 600')
@@ -290,9 +291,7 @@ def iPCR(db_name_arg, primers_arg: tuple, mismatch_arg: int = 0):
 
     return count_archaea+count_bacteria, count_bacteria, count_archaea, represented_accessions, total_accession_count
 def print_report(heading, action) -> None:
-    #print(''.join(['=' for i in range(len(heading) + 2)]))
-    print(f'{heading}:     {action}')
-    #print(''.join(['=' for i in range(len(heading) + 2)]))
+    print(f'{heading}:\t\t{action}')
 def print_runtime(action) -> None:
     """Prints an action with the time it was performed."""
     print(f'[{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}] {action}')
