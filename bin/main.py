@@ -3,7 +3,7 @@
 Author : Erick Samera
 Date   : 2022-07-30->2022-07-31
 Purpose: To run an in-silico PCR using bacterial genomes.
-Version: v2.1.0
+Version: v2.1.1
 """
 
 # TODO:
@@ -36,6 +36,7 @@ class Args(NamedTuple):
     init: bool
     run: bool
     name: str
+    verbose: bool
     overwrite: bool
     db_fetch_num: int
     f_seq: str
@@ -68,6 +69,11 @@ def get_args() -> Args:
         type=str,
         default=None,
         help="name of database to either initialize (--init) or run (--run)")
+    parser.add_argument(
+        '-v',
+        dest='verbose',
+        action='store_true',
+        help="verbose")
 
 
     group_database = parser.add_argument_group(
@@ -149,7 +155,7 @@ def get_args() -> Args:
             if nucleotide not in allowed_chars:
                 parser.error(f'Invalid character {nucleotide} in primer sequences.')
 
-    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch, args.memory, args.job_name)
+    return Args(args.init, args.run, args.name, args.verbose, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch, args.memory, args.job_name)
 # --------------------------------------------------
 def main() -> None:
     args = get_args()
@@ -174,9 +180,13 @@ def main() -> None:
         actual_total_accession_count = {'Bacteria': 0, 'Archaea': 0}
         total_raw_taxonomy = []
 
+        # make it relative to the mismatches in the primers
+        lower_end = max([sum([primer.count(degen_nuc) for degen_nuc in 'UWSMKRYBDHVN']) for primer in (args.f_seq.upper(), args.r_seq.upper())])
+        lower_end = 0
+
         # realistically 10?
-        for mismatch_iter in range(0, args.max_mismatch+1):
-            print_runtime(f'Performing PCR. Allowing {mismatch_iter} mismatches ...)')
+        for mismatch_iter in range(lower_end, lower_end+(args.max_mismatch+1)):
+            if args.verbose: print_runtime(f'Performing PCR. Allowing {mismatch_iter-lower_end} mismatches ...)')
             iPCR_results = iPCR(named_db, (args.f_seq, args.r_seq), mismatch_iter, args.memory)
 
             total_count += iPCR_results[0]
