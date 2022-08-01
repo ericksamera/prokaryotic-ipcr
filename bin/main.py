@@ -3,8 +3,18 @@
 Author : Erick Samera
 Date   : 2022-07-30->2022-07-31
 Purpose: To run an in-silico PCR using bacterial genomes.
-Version: v2.0.0
+Version: v2.1.0
 """
+
+# TODO:
+# - cleanup and refactoring
+# - have PCR results from other jobs saved separately
+# 
+# FUTURE:
+# - add support for taxonomic identification via BLAST search
+# - better visualization and statistical analysis
+# - REFACTOR
+
 
 # argument parsing modules
 import argparse
@@ -32,6 +42,7 @@ class Args(NamedTuple):
     r_seq: str
     max_mismatch: int
     memory: int
+    job_name: str
 # --------------------------------------------------
 def get_args() -> Args:
     """ Get command-line arguments """
@@ -103,6 +114,13 @@ def get_args() -> Args:
         type=int,
         default=None,
         help="memory (MB) to allocate to in-silico PCR")
+    group_ipcr.add_argument(
+        '-j',
+        dest='job_name',
+        metavar='name',
+        type=str,
+        default=time.strftime("%Y%m%d_%H%M%S", time.localtime()),
+        help="job name for reporting")
 
     args = parser.parse_args()
 
@@ -114,18 +132,24 @@ def get_args() -> Args:
     if all((args.init, pathlib.Path.cwd().joinpath('db').joinpath(args.name).exists(), not args.overwrite)):
         parser.error('Database already exists. Use --overwrite to overwrite this database.')
 
+    # if initializing the database and it already exists, make sure overwrite flag is active
+    if all((args.run, not pathlib.Path.cwd().joinpath('db').joinpath(args.name).exists())):
+        parser.error('Database does not exist. Set up database with --init.')
+
     # if running the database, make sure the forward and reverse primer sequences are specified
     if args.run and not (args.f_seq and args.r_seq):
         parser.error('Specify the forward and reverse primer sequences with -f and -r, respectively.')
 
-    # if primers are specified, make sure that they're actually
+    if len(args.f_seq)<10 or len(args.r_seq)<10:
+        parser.error('Primers are usually longer.')
+    # if primers are specified, make sure nucleotides are valid
     allowed_chars = 'ACGTUWSMKRYBDHVN'
     if (args.f_seq and args.r_seq):
         for nucleotide in (args.f_seq.upper() + args.r_seq.upper()):
             if nucleotide not in allowed_chars:
                 parser.error(f'Invalid character {nucleotide} in primer sequences.')
 
-    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch, args.memory)
+    return Args(args.init, args.run, args.name, args.overwrite, args.db_fetch_num, args.f_seq, args.r_seq, args.max_mismatch, args.memory, args.job_name)
 # --------------------------------------------------
 def main() -> None:
     args = get_args()
@@ -135,10 +159,12 @@ def main() -> None:
     db_output = home.joinpath('db')
     db_output.mkdir(parents=True, exist_ok=True)
 
+    # initialize named database
     if args.init:
         named_db=db_output.joinpath(args.name)
         create_db(named_db, args.db_fetch_num)
 
+    # run against named database
     elif args.run:
         named_db=db_output.joinpath(args.name)
         total_count = total_bacterial_count = total_archaeal_count = 0
@@ -149,14 +175,15 @@ def main() -> None:
         total_raw_taxonomy = []
 
         # realistically 10?
-        for mismatch_iter in range(0, args.max_mismatch):
-            print_runtime(f'Iteratively allowing more mismatches in the primer sequence... (Iteration {mismatch_iter+1})')
+        for mismatch_iter in range(0, args.max_mismatch+1):
+            print_runtime(f'Performing PCR. Allowing {mismatch_iter} mismatches ...)')
             iPCR_results = iPCR(named_db, (args.f_seq, args.r_seq), mismatch_iter, args.memory)
 
             total_count += iPCR_results[0]
             total_bacterial_count += iPCR_results[1]
             total_archaeal_count += iPCR_results[2]
 
+            #
             for taxon in iter_represented_accession_count:
                 iter_represented_accession_count[taxon] += len(iPCR_results[3][taxon])
                 iter_total_represented_accession_count[taxon] += iPCR_results[4][taxon]
@@ -166,20 +193,21 @@ def main() -> None:
                         actual_represented_accession_count[taxon] = len(iPCR_results[3][taxon])
                 except: pass
             total_raw_taxonomy += iPCR_results[5]
-            print(pd.DataFrame(iPCR_results[5]))
-        # total_raw ta
-        
+
         process_raw_taxonomy(total_raw_taxonomy).to_csv(named_db.joinpath('taxonomy_results.csv'))
 
-        print_runtime("Completed job. \n")
-        print_report("Population", f"Total: {actual_total_accession_count['Bacteria']+actual_total_accession_count['Archaea']}\tBacteria: {actual_total_accession_count['Bacteria']}\tArchaea: {actual_total_accession_count['Archaea']}")
+        # MAKE THIS INTO ITS OWN FUNCTION
+        print_runtime(f"Completed job {args.job_name}. \n")
+        print_report('', f'==========[ {args.job_name} ]==========')
+        print_report("DB population", f"Total: {actual_total_accession_count['Bacteria']+actual_total_accession_count['Archaea']}\tBacteria: {actual_total_accession_count['Bacteria']}\tArchaea: {actual_total_accession_count['Archaea']}")
+        print_report("PCR settings", f"Forward: {args.f_seq.upper()}\tReverse: {args.r_seq.upper()}\tMaximum mismatches: {args.max_mismatch}\n")
         print_report("Total 'reads'", f'Total: {total_count}\tBacteria: {total_bacterial_count}\tArchaea: {total_archaeal_count}')
         for taxon in iter_represented_accession_count:
             try:approx_efficiency = iter_represented_accession_count[taxon]/iter_total_represented_accession_count[taxon]
             except ZeroDivisionError: approx_efficiency = 0.0
             try: percent_represented = actual_represented_accession_count[taxon]/actual_total_accession_count[taxon]
             except: percent_represented = 0.0
-            print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)}\tPercent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
+            print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)} %\tPercent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
 # --------------------------------------------------'
 def process_raw_taxonomy(total_raw_taxonomy_arg: list) -> pd.DataFrame:
     raw_taxonomy_DataFrame = pd.DataFrame(total_raw_taxonomy_arg)
