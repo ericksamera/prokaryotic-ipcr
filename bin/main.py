@@ -3,7 +3,7 @@
 Author : Erick Samera
 Date   : 2022-07-30->2022-07-31
 Purpose: To run an in-silico PCR using bacterial genomes.
-Version: v1.1.0
+Version: v2.0.0
 """
 
 # argument parsing modules
@@ -12,6 +12,10 @@ from typing import NamedTuple
 
 # required modules
 from Bio import Entrez, SeqIO
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
+from random import random
+import pandas as pd
 import pathlib
 import time
 import subprocess
@@ -142,6 +146,7 @@ def main() -> None:
         iter_total_represented_accession_count = {'Bacteria': 0, 'Archaea': 0}
         actual_represented_accession_count = {'Bacteria': 0, 'Archaea': 0}
         actual_total_accession_count = {'Bacteria': 0, 'Archaea': 0}
+        total_raw_taxonomy = []
 
         # realistically 10?
         for mismatch_iter in range(0, args.max_mismatch):
@@ -160,6 +165,12 @@ def main() -> None:
                     if len(iPCR_results[3][taxon]) > actual_represented_accession_count[taxon]:
                         actual_represented_accession_count[taxon] = len(iPCR_results[3][taxon])
                 except: pass
+            total_raw_taxonomy += iPCR_results[5]
+            print(pd.DataFrame(iPCR_results[5]))
+        # total_raw ta
+        
+        process_raw_taxonomy(total_raw_taxonomy).to_csv(named_db.joinpath('taxonomy_results.csv'))
+
         print_runtime("Completed job. \n")
         print_report("Population", f"Total: {actual_total_accession_count['Bacteria']+actual_total_accession_count['Archaea']}\tBacteria: {actual_total_accession_count['Bacteria']}\tArchaea: {actual_total_accession_count['Archaea']}")
         print_report("Total 'reads'", f'Total: {total_count}\tBacteria: {total_bacterial_count}\tArchaea: {total_archaeal_count}')
@@ -170,6 +181,12 @@ def main() -> None:
             except: percent_represented = 0.0
             print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)}\tPercent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
 # --------------------------------------------------'
+def process_raw_taxonomy(total_raw_taxonomy_arg: list) -> pd.DataFrame:
+    raw_taxonomy_DataFrame = pd.DataFrame(total_raw_taxonomy_arg)
+    for column_index, column_value in enumerate(raw_taxonomy_DataFrame):
+        for row_index, row_value in raw_taxonomy_DataFrame.iterrows():
+            if not row_value[column_value]: raw_taxonomy_DataFrame.loc[row_index, list(raw_taxonomy_DataFrame.columns)[column_index]] = raw_taxonomy_DataFrame.loc[row_index, list(raw_taxonomy_DataFrame.columns)[column_index-1]]
+    return raw_taxonomy_DataFrame
 def create_db(db_name_arg: pathlib.Path, db_fetch_num_arg: int) -> None:
     """
     Create a named database and fetch a number of sequences.
@@ -266,6 +283,8 @@ def iPCR(db_name_arg: pathlib.Path, primers_arg: tuple, mismatch_arg: int = 0, m
     # variables to declare for something?
     represented_accessions = {'Bacteria': [], 'Archaea': []}
     total_accession_count = {'Bacteria': 0, 'Archaea': 0}
+    raw_accessions = []
+    raw_sequences = []
     count_bacteria = count_archaea = 0
     size_filter = (0, 600)
 
@@ -303,12 +322,21 @@ def iPCR(db_name_arg: pathlib.Path, primers_arg: tuple, mismatch_arg: int = 0, m
                 if taxonomy_data[PCR_assession][0] == 'Bacteria': count_bacteria += 1
                 if taxonomy_data[PCR_assession][0] == 'Archaea': count_archaea += 1
                 represented_accessions[taxonomy_data[PCR_assession][0]].append(PCR_assession)
+                raw_accessions.append(taxonomy_data[PCR_assession])
+                raw_sequences.append(
+                    SeqRecord(
+                        Seq(PCR_sequence.upper()),
+                        id=f'{PCR_assession}_{random()}',
+                        description=f'MISMATCH_ITER {mismatch_arg}'
+                        )
+                    )
+    SeqIO.write(raw_sequences, db_name_arg.joinpath(f'raw_seqs_{mismatch_arg}.fasta'), 'fasta')
     for taxon in represented_accessions:
         represented_accessions[taxon] = sorted(set(represented_accessions[taxon]))
 
     total_read_count = count_archaea+count_bacteria
 
-    return total_read_count, count_bacteria, count_archaea, represented_accessions, total_accession_count
+    return total_read_count, count_bacteria, count_archaea, represented_accessions, total_accession_count, raw_accessions
 def print_report(heading, action) -> None:
     """Print some reporting information at the end of the program."""
     print(f'{heading}:\t\t{action}')
