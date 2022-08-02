@@ -3,7 +3,7 @@
 Author : Erick Samera
 Date   : 2022-07-30->2022-07-31
 Purpose: To run an in-silico PCR using bacterial genomes.
-Version: v2.1.1
+Version: v2.1.2
 """
 
 # TODO:
@@ -146,8 +146,10 @@ def get_args() -> Args:
     if args.run and not (args.f_seq and args.r_seq):
         parser.error('Specify the forward and reverse primer sequences with -f and -r, respectively.')
 
-    if len(args.f_seq)<10 or len(args.r_seq)<10:
+    # if running the database, make sure the forward and reverse primer sequences are realistically long
+    if args.run and (len(args.f_seq)<10 or len(args.r_seq)<10): 
         parser.error('Primers are usually longer.')
+
     # if primers are specified, make sure nucleotides are valid
     allowed_chars = 'ACGTUWSMKRYBDHVN'
     if (args.f_seq and args.r_seq):
@@ -204,7 +206,7 @@ def main() -> None:
                 except: pass
             total_raw_taxonomy += iPCR_results[5]
 
-        process_raw_taxonomy(total_raw_taxonomy).to_csv(named_db.joinpath('taxonomy_results.csv'))
+        process_raw_taxonomy_results(total_raw_taxonomy).to_csv(named_db.joinpath('taxonomy_results.csv'))
 
         # MAKE THIS INTO ITS OWN FUNCTION
         print_runtime(f"Completed job {args.job_name}. \n")
@@ -219,7 +221,7 @@ def main() -> None:
             except: percent_represented = 0.0
             print_report(f"{taxon}", f'Approximate efficiency: {round(approx_efficiency*100, 2)} %\tPercent representation of accessions: {round(percent_represented*100, 2)} % ({actual_represented_accession_count[taxon]}/{actual_total_accession_count[taxon]})')
 # --------------------------------------------------'
-def process_raw_taxonomy(total_raw_taxonomy_arg: list) -> pd.DataFrame:
+def process_raw_taxonomy_results(total_raw_taxonomy_arg: list) -> pd.DataFrame:
     raw_taxonomy_DataFrame = pd.DataFrame(total_raw_taxonomy_arg)
     for column_index, column_value in enumerate(raw_taxonomy_DataFrame):
         for row_index, row_value in raw_taxonomy_DataFrame.iterrows():
