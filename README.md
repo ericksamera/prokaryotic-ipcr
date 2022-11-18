@@ -27,7 +27,7 @@ python3 bin/main.py --run <name> \
 ```
 
 ## Use-case example
-This is an example use-case which compares the efficacy of 16S primers that target either both bacteria and arcahea, or archaea specific primers:
+This is an example use-case which compares the efficacy of 16S primers that target either both bacteria and archaea, or archaea specific primers:
 ```
 #!/bin/bash
 
